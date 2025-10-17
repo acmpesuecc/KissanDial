@@ -1,9 +1,8 @@
 from flask import Flask, request
 from twilio.twiml.voice_response import VoiceResponse, Gather
 import os
-import sys
-from pathlib import Path
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, ServiceContext
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+from llama_index.llms.openai import OpenAI
 from llama_index.core.agent import ReActAgent
 from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
 from llama_index.core.agent import FunctionCallingAgentWorker
@@ -11,6 +10,15 @@ from llama_index.core.memory import ChatMemoryBuffer
 import pandas as pd
 from twilio.rest import Client
 from dotenv import load_dotenv
+import sys
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
+
+dotenv_path = os.path.join(ROOT_DIR, '.env')
+load_dotenv(dotenv_path)
+AGROMET_PATH = os.path.join(ROOT_DIR, "data", "AgroMetAdv", "agromet.csv")
+SUBSIDY_PATH = os.path.join(ROOT_DIR, "data", "subsidies", "central", "main_subsidy_data.csv")
 
 # Add tools directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -40,41 +48,27 @@ if LLM_FACTORY_AVAILABLE:
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 
-# Check for required environment variables and create LLM
-if LLM_FACTORY_AVAILABLE:
-    try:
-        # This will validate that required API keys are present
-        llm = create_llm()
-        print(f"Successfully created LLM instance", file=sys.stderr)
-    except ValueError as e:
-        raise RuntimeError(str(e))
-else:
-    # Fallback to OpenAI only
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY not set. Set it in environment or .env")
-    llm = OpenAI(temperature=0, model="gpt-4o", api_key=OPENAI_API_KEY)
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY not set. Set it in environment or .env")
 if not TWILIO_AUTH_TOKEN:
-    # In case of there not being any API Key assigned, then it throws an error
     raise RuntimeError("TWILIO_AUTH_TOKEN not set. Set it in environment or .env")
 if not TWILIO_ACCOUNT_SID:
-    # In case of there not being any API Key assigned, then it throws an error
     raise RuntimeError("TWILIO_ACCOUNT_SID not set. Set it in environment or .env")
-
 
 to_say = 'Hi welcome to the Agricultural Assistant. How can I help you today?'
 
 app = Flask(__name__)
 
 # Load and index documents
-subsidy_docs = SimpleDirectoryReader(input_files=["../data/subsidies/central/main_subsidy_data.csv"]).load_data()
+subsidy_docs = SimpleDirectoryReader(input_files=["data/subsidies/central/main_subsidy_data.csv"]).load_data()
 subsidy_index = VectorStoreIndex.from_documents(subsidy_docs)
 
 # Create query engine
 subsidy_engine = subsidy_index.as_query_engine(similarity_top_k=6)
 
 # Load the CSV file
-df = pd.read_csv("../data/subsidies/central/main_subsidy_data.csv")
+df = pd.read_csv("data/subsidies/central/main_subsidy_data.csv")
+
 
 def send_sms_with_subsidy_info(query: str) -> str:
     """
@@ -86,7 +80,6 @@ def send_sms_with_subsidy_info(query: str) -> str:
     print(f"Results: {results}")
     
     sms_body = "How to apply for relevant subsidies:\n\n"
-    # for subsidy in relevant_subsidies:
     sms_body += f"{results}"
 
     account_sid = TWILIO_ACCOUNT_SID
@@ -102,6 +95,7 @@ def send_sms_with_subsidy_info(query: str) -> str:
         return f"SMS sent successfully with SID: {message.sid}"
     except Exception as e:
         return f"Error sending SMS: {str(e)}"
+
 
 # Define tools
 subsidy_tool = QueryEngineTool(
@@ -151,17 +145,20 @@ Remember to follow the below rules strictly:
 """
 
 # Initialize the agent
-# LLM is already created above during validation
+llm = OpenAI(temperature=0, model="gpt-4o", api_key=OPENAI_API_KEY)
 memory = ChatMemoryBuffer.from_defaults(token_limit=2048)
+
 agent_worker = FunctionCallingAgentWorker.from_tools(
-  [subsidy_tool, sms_tool],
-  system_prompt=CUSTOM_PROMPT,
-  memory=memory,
-  llm=llm,
-  verbose=True,
-  allow_parallel_tool_calls=False,
+    [subsidy_tool, sms_tool],
+    system_prompt=CUSTOM_PROMPT,
+    memory=memory,
+    llm=llm,
+    verbose=True,
+    allow_parallel_tool_calls=False,
 )
+
 agent = agent_worker.as_agent()
+
 
 @app.route("/voice", methods=['POST'])
 def voice():
@@ -173,19 +170,19 @@ def voice():
         input="speech",
         action="/handle-speech",
         method="POST",
-        speechTimeout="1",
-        speechModel="experimental_conversations",
+        speech_timeout="auto",
+        speech_model="experimental_conversations",
         enhanced=True
     )
     gather.say(to_say)
     resp.append(gather)
     
     resp.redirect("/voice")
-    
     return str(resp)
 
+
 @app.route("/handle-speech", methods=['POST'])
-async def handle_speech():
+def handle_speech():
     global to_say
     resp = VoiceResponse()
 
@@ -200,13 +197,9 @@ async def handle_speech():
     else:
         resp.say("I'm sorry, I didn't catch that. Could you please repeat?")
         resp.redirect("/voice")
+    
     return str(resp)
 
+
 if __name__ == "__main__":
-    print("Starting KissanDial Agricultural Assistant...")
-    if LLM_FACTORY_AVAILABLE:
-        provider_info = get_provider_info()
-        print(f"LLM Provider: {provider_info['provider']} - {provider_info['model']}")
-    else:
-        print("LLM Provider: OpenAI (fallback)")
     app.run(debug=True)
