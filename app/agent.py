@@ -3,6 +3,15 @@ from twilio.twiml.voice_response import VoiceResponse, Gather
 import os
 import pandas as pd
 from twilio.rest import Client
+from dotenv import load_dotenv
+import sys
+
+# Load environment variables
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(ROOT_DIR)
+
+dotenv_path = os.path.join(ROOT_DIR, '.env')
+load_dotenv(dotenv_path)
 
 # Try to import LlamaIndex components, with fallbacks for testing
 try:
@@ -36,9 +45,10 @@ class MockQueryEngine:
         return f"Mock response for: {query}"
 
 class OpenAI:
-    def __init__(self, temperature=0, model="gpt-4"):
+    def __init__(self, temperature=0, model="gpt-4", api_key=None):
         self.temperature = temperature
         self.model = model
+        self.api_key = api_key
 
 class QueryEngineTool:
     def __init__(self, query_engine, metadata):
@@ -71,20 +81,28 @@ class MockAgent:
     def chat(self, message):
         return f"Mock agent response to: {message}"
 
+# Load environment variables
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 
 # Set up OpenAI API key - use dummy key for testing if not set
-if not os.environ.get("OPENAI_API_KEY"):
-    os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
+if not OPENAI_API_KEY:
+    OPENAI_API_KEY = "dummy-key-for-testing"
+    print("Warning: OPENAI_API_KEY not set. Using dummy key for testing.")
+
+# Set environment variable for LlamaIndex
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 to_say = 'Hi welcome to the Agricultural Assistant. How can I help you today?'
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "replace-me")
 
-
-# Get the project root directory
+# Get the project root directory and file paths
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 csv_path = os.path.join(project_root, "data", "subsidies", "central", "main_subsidy_data.csv")
+agromet_path = os.path.join(project_root, "data", "AgroMetAdv", "agromet.csv")
 
 # Initialize components conditionally
 if LLAMA_INDEX_AVAILABLE:
@@ -115,11 +133,15 @@ def send_sms_with_subsidy_info(query: str) -> str:
     print(f"Results: {results}")
     
     sms_body = "How to apply for relevant subsidies:\n\n"
-    # for subsidy in relevant_subsidies:
     sms_body += f"{results}"
 
-    account_sid = ''
-    auth_token = ''
+    # Use environment variables for Twilio credentials
+    account_sid = TWILIO_ACCOUNT_SID or ''
+    auth_token = TWILIO_AUTH_TOKEN or ''
+    
+    if not account_sid or not auth_token:
+        return "Error: Twilio credentials not configured"
+    
     client = Client(account_sid, auth_token)
     
     try:
@@ -182,7 +204,7 @@ Remember to follow the below rules strictly:
 # Initialize the agent conditionally
 if LLAMA_INDEX_AVAILABLE:
     try:
-        llm = OpenAI(temperature=0, model="gpt-4")
+        llm = OpenAI(temperature=0, model="gpt-4", api_key=OPENAI_API_KEY)
         memory = ChatMemoryBuffer.from_defaults(token_limit=2048)
         agent_worker = OpenAIAgentWorker.from_tools(
           [subsidy_tool, sms_tool], system_prompt=CUSTOM_PROMPT, 
@@ -205,12 +227,18 @@ def voice():
     to_say = session.get(f'to_say_{sid}', "Hi welcome to the Agricultural Assistant. How can I help you today?")
     print(f'to_say {to_say}')
     resp = VoiceResponse()
-    gather = Gather(input='speech', action='/handle-speech', method='POST', speechTimeout='1', speechModel='experimental_conversations', enhanced=True)
+    gather = Gather(
+        input='speech', 
+        action='/handle-speech', 
+        method='POST', 
+        speechTimeout='1', 
+        speechModel='experimental_conversations', 
+        enhanced=True
+    )
     gather.say(to_say)
     resp.append(gather)
     resp.redirect('/voice')
     return str(resp)
-
 
 @app.route('/handle-speech', methods=['POST'])
 def handlespeech():
@@ -227,7 +255,6 @@ def handlespeech():
         resp.say("I'm sorry, I didn't catch that. Could you please repeat?")
         resp.redirect('/voice')
     return str(resp)
-
 
 if __name__ == "__main__":
     app.run(debug=True)
