@@ -1,7 +1,26 @@
-Requirements:
-Flask>=3.0
-twilio>=8.0.0
-llama-index
-pandas>=2.3.3
+# Core web framework
+Flask==2.3.3
+
+# Twilio integration
+twilio==8.10.0
+
+# LlamaIndex for AI agent - using compatible version
+llama-index==0.9.48
+
+# OpenAI integration
 openai>=0.27.0
-python-dotenv
+
+# Data processing - compatible versions
+numpy==1.24.3
+pandas>=2.3.3
+
+# Testing
+pytest==7.4.2
+
+# Development tools
+mypy==1.5.1
+flake8==6.0.0
+black==23.7.0
+
+# Environment management
+python-dotenv==1.0.0
