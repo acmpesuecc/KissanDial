@@ -1,0 +1,7 @@
+Requirements:
+Flask>=3.0
+twilio>=8.0.0
+llama-index
+pandas>=2.3.3
+openai>=0.27.0
+python-dotenv
