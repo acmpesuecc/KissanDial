@@ -20,11 +20,29 @@ load_dotenv(dotenv_path)
 AGROMET_PATH = os.path.join(ROOT_DIR, "data", "AgroMetAdv", "agromet.csv")
 SUBSIDY_PATH = os.path.join(ROOT_DIR, "data", "subsidies", "central", "main_subsidy_data.csv")
 
+# Add tools directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import LLM factory
+try:
+    from tools.llm_factory import create_llm, get_provider_info
+    LLM_FACTORY_AVAILABLE = True
+    print("LLM factory available", file=sys.stderr)
+except ImportError as e:
+    print(f"LLM factory not available: {e}", file=sys.stderr)
+    LLM_FACTORY_AVAILABLE = False
+    # Fallback to direct OpenAI import
+    from llama_index.llms.openai import OpenAI
+
 # Loads the variables from env
 load_dotenv()
 
-# This loads the API Key of OPEN AI from env files
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+# Get LLM provider info for logging
+if LLM_FACTORY_AVAILABLE:
+    provider_info = get_provider_info()
+    print(f"LLM Provider: {provider_info['provider']}", file=sys.stderr)
+    print(f"API Key Configured: {provider_info['api_key_configured']}", file=sys.stderr)
+    print(f"Model: {provider_info['model']}", file=sys.stderr)
 
 # This loads the TWILIO Credentials
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
